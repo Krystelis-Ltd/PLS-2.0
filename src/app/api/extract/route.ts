@@ -42,7 +42,22 @@ export async function POST(request: NextRequest) {
         const combinedPrompt = `Please perform the following list of separate data extraction tasks from the provided document.
 You MUST return a SINGLE, valid JSON object where the top-level keys are the exact TASK KEYs provided below.
 
-${keys.map(k => `==============================\nTASK KEY: "${k}"\nORIGINAL INSTRUCTIONS:\n${batchPrompts[k]}\n\n**CRITICAL OVERRIDE INSTRUCTION FOR THIS TASK:**\nInstead of directly returning the "FINAL JSON OUTPUT" requested in the instructions above, you MUST wrap it inside a "data" property, and include metadata properties alongside it.\nYour output object for "${k}" MUST EXACTLY match this schema:\n{\n  "data": { ...<the exact FINAL JSON OUTPUT requested by the original instructions>... },\n  "confidence_score": 95,\n  "source_quote": "Exact sentence(s) from the source document that proves this data.",\n  "source_file": "document1.pdf",\n  "source_page": "Page 5",\n  "source_section": "2.1 Background"\n}`).join('\n\n')}
+**CRITICAL TABLE FORMAT REQUIREMENTS:**
+When the task asks for TABLE data (e.g., race_table, adverse_event_table, any table), you MUST use this EXACT structure:
+{
+  "table_name": {
+    "headers": ["Column1", "Column2", "Column3"],
+    "rows": [
+      ["Row1Col1", "Row1Col2", "Row1Col3"],
+      ["Row2Col1", "Row2Col2", "Row2Col3"]
+    ]
+  }
+}
+- "headers" MUST be an array of column header strings
+- "rows" MUST be an array of arrays, where each inner array is a row of cell values
+- Do NOT use objects like [{col1: val1, col2: val2}] - use the headers/rows format instead
+
+${keys.map(k => `==============================\nTASK KEY: "${k}"\nORIGINAL INSTRUCTIONS:\n${batchPrompts[k]}\n\n**CRITICAL OVERRIDE INSTRUCTION FOR THIS TASK:**\nInstead of directly returning the "FINAL JSON OUTPUT" requested in the instructions above, you MUST wrap it inside a "data" property, and include metadata properties alongside it.\nYour output object for "${k}" MUST EXACTLY match this schema:\n{\n  "data": { ...<the exact FINAL JSON OUTPUT requested by the original instructions>... },\n  "confidence_score": 95,\n  "reasoning": "Brief explanation of how this data was extracted and why this confidence score was assigned.",\n  "source_quote": "Exact sentence(s) from the source document that proves this data.",\n  "source_file": "document1.pdf; document2.pdf (if multiple sources, separate with semicolons)",\n  "source_page": "Page 5; Page 12 (if multiple pages, separate with semicolons)",\n  "source_section": "2.1 Background; 3.2 Methods (if multiple sections, separate with semicolons)"\n}\n\nIMPORTANT: If data comes from MULTIPLE sources/files/pages/sections, list ALL of them separated by semicolons.\nIMPORTANT: For any TABLE data, use the headers/rows format as specified above.`).join('\n\n')}
 `;
 
         // Polling / Retry logic for OpenAI Responses API

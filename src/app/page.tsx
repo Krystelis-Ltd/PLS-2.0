@@ -5,6 +5,134 @@ import { extractPrompts } from '@/utils/promptLoader'
 import { JsonEditor } from '@/components/JsonEditor'
 import { Chatbot } from '@/components/Chatbot'
 
+// ============ TEST DATA FOR UI DEVELOPMENT ============
+const MOCK_EXTRACTION_DATA = [
+  {
+    title: "title_prompt",
+    status: "COMPLETED",
+    data: "A clinical trial to learn more about the effects of WVT078 in people with advanced cancer",
+    parsedObj: { "title": "A clinical trial to learn more about the effects of WVT078 in people with advanced cancer" },
+    confidenceScore: 96,
+    reasoning: "The title was clearly stated on the title page of the protocol document. I simplified the medical terminology to make it accessible for a general audience while preserving the key information about the drug and condition.",
+    sourceQuote: "A Phase I, Open-label, Multi-center, Dose Escalation Study of WVT078 as a Single Agent and in Combination with WHG626 in Patients with Advanced Solid Tumors",
+    sourceFile: "WVT078A12101 Protocol - v05_0.docx",
+    sourcePage: "Title Page",
+    sourceSection: "Study Title"
+  },
+  {
+    title: "primary_objective_prompt",
+    status: "COMPLETED",
+    data: JSON.stringify({ "Primary Objective": ["To find out if WVT078 is safe when given alone", "To find out the best dose of WVT078 for future trials"] }, null, 2),
+    parsedObj: { "Primary Objective": ["To find out if WVT078 is safe when given alone", "To find out the best dose of WVT078 for future trials"] },
+    confidenceScore: 92,
+    reasoning: "Primary objectives were explicitly listed in the protocol summary. I translated technical terms like 'DLTs' and 'SAEs' into plain language. Confidence is high but not 100% because objectives spanned multiple subsections.",
+    sourceQuote: "Primary Objective(s)\nTo characterize the safety, tolerability, and determine recommended dose regimen of single agent WVT078 and WVT078 in combination with WHG626 for future studies, by assessing the incidence and severity of DLTs, AEs, and SAEs and the frequency of dose interruptions, discontinuations and reductions",
+    sourceFile: "WVT078A12101 Protocol - v05_0.docx; CWVT078A12101 Report Body V1.0.docx",
+    sourcePage: "Protocol summary page; Page 15",
+    sourceSection: "Primary Objective(s); 1.2 Study Objectives"
+  },
+  {
+    title: "health_condition_prompt",
+    status: "COMPLETED",
+    data: "Advanced solid tumors (cancer)",
+    parsedObj: { "Health condition": "Advanced solid tumors (cancer)" },
+    confidenceScore: 98,
+    reasoning: "The health condition is unambiguously stated in the study title and inclusion criteria. Added parenthetical clarification for lay readers.",
+    sourceQuote: "in Patients with Advanced Solid Tumors",
+    sourceFile: "WVT078A12101 Protocol - v05_0.docx",
+    sourcePage: "Page 1",
+    sourceSection: "Title"
+  },
+  {
+    title: "total_number_of_countries_prompt",
+    status: "COMPLETED",
+    data: "56 participants from 8 countries received treatment.",
+    parsedObj: { "Total number of countries": "56 participants from 8 countries received treatment." },
+    confidenceScore: 99,
+    reasoning: "The participant count and country information was found in the Results Disclosure Form and corroborated by the Report Body. Both sources agree on the numbers.",
+    sourceQuote: "Centers 12 centers in 8 countries: United States(3), Germany(2), Spain(2), Israel(1), Japan(1), Italy(1), Australia(1), Norway(1). ... All 56 participants received at least one prior antineoplastic therapy.",
+    sourceFile: "CWVT078A12101_Results Disclosure Form_NovCTR_v1.docx; CWVT078A12101 Report Component Report Body V1.0.docx",
+    sourcePage: "Results Disclosure Form Summary; Page 47",
+    sourceSection: "Centers; Prior and concomitant therapies"
+  },
+  {
+    title: "race_table_prompt",
+    status: "COMPLETED",
+    data: JSON.stringify({
+      "race_table": {
+        "headers": ["Race", "Number of Participants", "Percentage"],
+        "rows": [
+          ["White or Caucasian", "145", "72%"],
+          ["Asian", "35", "18%"],
+          ["Black or African American", "15", "8%"],
+          ["Other", "5", "2%"]
+        ]
+      }
+    }, null, 2),
+    parsedObj: {
+      "race_table": {
+        "headers": ["Race", "Number of Participants", "Percentage"],
+        "rows": [
+          ["White or Caucasian", "145", "72%"],
+          ["Asian", "35", "18%"],
+          ["Black or African American", "15", "8%"],
+          ["Other", "5", "2%"]
+        ]
+      }
+    },
+    confidenceScore: 78,
+    reasoning: "Demographics table found but percentages were calculated from the raw numbers. Some categories in the source were combined for simplicity. Medium confidence due to data aggregation.",
+    sourceQuote: "Demographics are summarized in Table 14.1.4. The majority of participants were White (72.5%), with Asian (17.5%) and Black or African American (7.5%) participants also enrolled.",
+    sourceFile: "WVT078A12101 CSR.pdf; CWVT078A12101 Report Body V1.0.docx",
+    sourcePage: "Page 45; Page 52",
+    sourceSection: "Table 14.1.4 Demographics; 11.2 Demographic and Baseline Characteristics"
+  },
+  {
+    title: "adverse_events_prompt",
+    status: "COMPLETED",
+    data: JSON.stringify({
+      "common_adverse_events": {
+        "headers": ["Adverse Event", "Percentage", "Severity"],
+        "rows": [
+          ["Nausea", "45%", "Mild"],
+          ["Fatigue", "38%", "Mild to Moderate"],
+          ["Headache", "22%", "Mild"],
+          ["Decreased appetite", "18%", "Mild"]
+        ]
+      }
+    }, null, 2),
+    parsedObj: {
+      "common_adverse_events": {
+        "headers": ["Adverse Event", "Percentage", "Severity"],
+        "rows": [
+          ["Nausea", "45%", "Mild"],
+          ["Fatigue", "38%", "Mild to Moderate"],
+          ["Headache", "22%", "Mild"],
+          ["Decreased appetite", "18%", "Mild"]
+        ]
+      }
+    },
+    confidenceScore: 65,
+    reasoning: "Adverse events were mentioned in narrative form but exact percentages required interpretation of multiple tables. Low confidence because the source text was fragmented and some values were approximated.",
+    sourceQuote: "The most frequently reported adverse events were gastrointestinal disorders including nausea...",
+    sourceFile: "WVT078A12101 CSR.pdf",
+    sourcePage: "Page 78; Page 82; Page 85",
+    sourceSection: "6.1 Adverse Events; Table 14.3.1; Safety Summary"
+  },
+  {
+    title: "study_design_prompt",
+    status: "COMPLETED",
+    data: "This was a Phase 1, open-label trial to test WVT078 in participants with advanced cancer. The trial had 2 parts: Part 1 tested increasing doses, and Part 2 tested the drug combined with WHG626.",
+    parsedObj: { "Study Design": "This was a Phase 1, open-label trial to test WVT078 in participants with advanced cancer. The trial had 2 parts: Part 1 tested increasing doses, and Part 2 tested the drug combined with WHG626." },
+    confidenceScore: 89,
+    reasoning: "Study design clearly documented in multiple sections. Simplified the dose escalation terminology for lay readers.",
+    sourceQuote: "This is a Phase I, open-label, multi-center dose escalation study... The study consists of two parts: Part 1 (dose escalation of single agent WVT078) and Part 2 (combination with WHG626).",
+    sourceFile: "WVT078A12101 Protocol - v05_0.docx",
+    sourcePage: "Page 12",
+    sourceSection: "3.1 Study Design"
+  }
+];
+
 export default function Dashboard() {
   const [readabilityLevel, setReadabilityLevel] = useState("6th Grade")
   const [mappingName, setMappingName] = useState("results_PLS")
@@ -159,6 +287,7 @@ export default function Dashboard() {
         if (res.ok && data.raw) {
           try {
             batchResults = JSON.parse(data.raw);
+            console.log("PARSED BATCH RESULTS:", JSON.stringify(batchResults, null, 2));
           } catch (e) {
             console.error("Failed to parse batch json payload", data.raw);
           }
@@ -179,21 +308,55 @@ export default function Dashboard() {
           });
 
           const refineData = await refinePromise.json();
+          console.log("REFINE API RESPONSE:", JSON.stringify(refineData, null, 2));
+
           if (refinePromise.ok && refineData.refinedJson) {
             try {
               const parsedRefined: Record<string, any> = JSON.parse(refineData.refinedJson);
+              console.log("PARSED REFINED KEYS:", Object.keys(parsedRefined));
+              console.log("ORIGINAL BATCH KEYS:", Object.keys(batchResults));
 
-              // Re-inject the metadata since the refinement agent often strips it
-              for (const key of Object.keys(parsedRefined)) {
-                if (batchResults[key]) {
-                  const metaKeys = ['confidence_score', 'source_quote', 'source_file', 'source_page', 'source_section'];
-                  for (const mKey of metaKeys) {
-                    if (batchResults[key][mKey] !== undefined) {
-                      parsedRefined[key][mKey] = batchResults[key][mKey];
-                    }
+              // Re-inject the metadata since the refinement agent ALWAYS strips it
+              // The metadata is stored at the root level of each key's object in batchResults
+              const metaKeys = ['confidence_score', 'source_quote', 'source_file', 'source_page', 'source_section', 'reasoning'];
+
+              for (const key of Object.keys(batchResults)) {
+                const originalObj = batchResults[key];
+
+                // Try to find matching key in parsedRefined (might have _prompt suffix or not)
+                const possibleKeys = [key, key + '_prompt', key.replace(/_prompt$/, '')];
+                let refinedObj = null;
+                let matchedKey = key;
+                for (const pk of possibleKeys) {
+                  if (parsedRefined[pk]) {
+                    refinedObj = parsedRefined[pk];
+                    matchedKey = pk;
+                    break;
                   }
                 }
+
+                console.log(`[REINJECT] key="${key}" -> matchedKey="${matchedKey}", found=${!!refinedObj}`);
+
+                if (originalObj && refinedObj) {
+                  for (const mKey of metaKeys) {
+                    if (originalObj[mKey] !== undefined) {
+                      refinedObj[mKey] = originalObj[mKey];
+                      console.log(`[REINJECT] Copied ${mKey}=${originalObj[mKey]} to refined object`);
+                    }
+                  }
+                  // Ensure the parsedRefined uses the original key (not _prompt version)
+                  if (matchedKey !== key) {
+                    parsedRefined[key] = refinedObj;
+                    delete parsedRefined[matchedKey];
+                  }
+                } else if (originalObj && !refinedObj) {
+                  // Refinement didn't include this key, use original WITH metadata
+                  console.log(`[REINJECT] No refined match for "${key}", using original with metadata`);
+                  parsedRefined[key] = originalObj;
+                }
               }
+
+              console.log("METADATA RE-INJECTION COMPLETE:", JSON.stringify(parsedRefined, null, 2));
 
               finalResultsToRender = parsedRefined;
             } catch (e) {
@@ -229,8 +392,8 @@ export default function Dashboard() {
               const validateData = await validatePromise.json();
               if (validatePromise.ok && validateData.validatedData) {
                 const validatedObj = validateData.validatedData;
-                // Preserve metadata
-                const metaKeys = ['confidence_score', 'source_quote', 'source_file', 'source_page', 'source_section'];
+                // Preserve metadata (including reasoning!)
+                const metaKeys = ['confidence_score', 'source_quote', 'source_file', 'source_page', 'source_section', 'reasoning'];
                 for (const mKey of metaKeys) {
                   if (rawObj[mKey] !== undefined) validatedObj[mKey] = rawObj[mKey];
                 }
@@ -248,16 +411,39 @@ export default function Dashboard() {
         setExtractionFeed(prev => prev.map(feed => {
           if (!batch.includes(feed.title)) return feed;
 
-          const finalObj = (finalResultsToRender as any)[feed.title] || {};
+          // Try multiple key variations since AI might return with/without _prompt suffix
+          const keyVariations = [
+            feed.title,
+            feed.title + '_prompt',
+            feed.title.replace(/_prompt$/, ''),
+          ];
 
-          // Extract metadata before stripping
+          let finalObj: any = {};
+          let matchedKey = feed.title;
+          for (const keyVar of keyVariations) {
+            if ((finalResultsToRender as any)[keyVar]) {
+              finalObj = (finalResultsToRender as any)[keyVar];
+              matchedKey = keyVar;
+              break;
+            }
+          }
+
+          // DEBUG: Log the finalObj structure to understand metadata location
+          console.log(`[${feed.title}] matched key: "${matchedKey}", finalObj BEFORE extraction:`, JSON.stringify(finalObj, null, 2));
+          console.log(`[${feed.title}] Available keys in finalResultsToRender:`, Object.keys(finalResultsToRender));
+
+          // Extract metadata before stripping (including reasoning)
           const confidenceScore = finalObj.confidence_score;
           const sourceQuote = finalObj.source_quote;
           const sourceFile = finalObj.source_file;
           const sourcePage = finalObj.source_page;
           const sourceSection = finalObj.source_section;
+          const reasoning = finalObj.reasoning;
 
-          // Strip "source" and citation fields appended by AI
+          // DEBUG: Log extracted metadata
+          console.log(`[${feed.title}] EXTRACTED METADATA:`, { confidenceScore, sourceQuote, sourceFile, sourcePage, sourceSection, reasoning });
+
+          // Strip "source" and citation fields appended by AI (but we've already saved them above)
           const keysToRemove = ['source', '_citations', 'citations', 'reasoning', 'confidence_score', 'source_quote', 'source_file', 'source_page', 'source_section'];
           for (const k of keysToRemove) {
             if (k in finalObj) {
@@ -277,7 +463,9 @@ export default function Dashboard() {
             extractedText = res.ok ? "AI returned empty for this key." : data.error || "Failed.";
           }
 
-          return { ...feed, status: "COMPLETED", data: extractedText, parsedObj: dataObj, confidenceScore, sourceQuote, sourceFile, sourcePage, sourceSection };
+          const newFeed = { ...feed, status: "COMPLETED", data: extractedText, parsedObj: dataObj, confidenceScore, sourceQuote, sourceFile, sourcePage, sourceSection, reasoning };
+          console.log(`[${feed.title}] FINAL FEED OBJECT:`, newFeed);
+          return newFeed;
         }));
 
       } catch (e) {
@@ -381,8 +569,216 @@ export default function Dashboard() {
       ));
     };
 
-    // Fall through to JsonEditor for spreadsheet views so ADD/REMOVE ROW buttons work.
+    // ========== EDITABLE TABLE RENDERING (headers + rows format) ==========
+    // Check if value has table structure: { headers: [...], rows: [[...], [...]] }
+    const isTableFormat = value.headers && Array.isArray(value.headers) && value.rows && Array.isArray(value.rows);
 
+    if (isTableFormat) {
+      const handleHeaderChange = (colIdx: number, newHeader: string) => {
+        const newHeaders = [...value.headers];
+        newHeaders[colIdx] = newHeader;
+        handleUpdate({ ...value, headers: newHeaders });
+      };
+
+      const handleCellChange = (rowIdx: number, colIdx: number, newValue: string) => {
+        const newRows = value.rows.map((row: string[], rIdx: number) =>
+          rIdx === rowIdx ? row.map((cell: string, cIdx: number) => cIdx === colIdx ? newValue : cell) : [...row]
+        );
+        handleUpdate({ ...value, rows: newRows });
+      };
+
+      const handleAddRow = () => {
+        const newRow = new Array(value.headers.length).fill('');
+        handleUpdate({ ...value, rows: [...value.rows, newRow] });
+      };
+
+      const handleRemoveRow = (rowIdx: number) => {
+        const newRows = value.rows.filter((_: any, idx: number) => idx !== rowIdx);
+        handleUpdate({ ...value, rows: newRows });
+      };
+
+      const handleAddColumn = () => {
+        const newHeaders = [...value.headers, `Column ${value.headers.length + 1}`];
+        const newRows = value.rows.map((row: string[]) => [...row, '']);
+        handleUpdate({ headers: newHeaders, rows: newRows });
+      };
+
+      const handleRemoveColumn = (colIdx: number) => {
+        const newHeaders = value.headers.filter((_: any, idx: number) => idx !== colIdx);
+        const newRows = value.rows.map((row: string[]) => row.filter((_: any, idx: number) => idx !== colIdx));
+        handleUpdate({ headers: newHeaders, rows: newRows });
+      };
+
+      return (
+        <div className="mt-4 space-y-3">
+          <div className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-gradient-to-r from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-800/80 border-b-2 border-slate-200 dark:border-slate-700">
+                  <tr>
+                    <th className="px-2 py-2 w-10 text-center text-slate-400 text-xs">#</th>
+                    {value.headers.map((header: string, colIdx: number) => (
+                      <th key={colIdx} className="px-3 py-2 border-l border-slate-200 dark:border-slate-700 min-w-[120px]">
+                        <div className="flex items-start gap-1">
+                          <textarea
+                            className="flex-1 bg-transparent font-bold text-slate-700 dark:text-slate-200 text-xs uppercase tracking-wider outline-none border-b-2 border-transparent focus:border-[var(--color-primary)] py-1 resize-none leading-tight"
+                            value={header}
+                            onChange={(e) => handleHeaderChange(colIdx, e.target.value)}
+                            rows={header.includes('\n') ? header.split('\n').length : 1}
+                          />
+                          <button
+                            onClick={() => handleRemoveColumn(colIdx)}
+                            className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity mt-1"
+                            title="Remove column"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">close</span>
+                          </button>
+                        </div>
+                      </th>
+                    ))}
+                    <th className="px-2 py-2 w-10"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {value.rows.map((row: string[], rowIdx: number) => (
+                    <tr key={rowIdx} className="group hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+                      <td className="px-2 py-2 text-center text-slate-400 text-xs font-mono align-top">{rowIdx + 1}</td>
+                      {row.map((cell: string, colIdx: number) => (
+                        <td key={colIdx} className="px-3 py-2 border-l border-slate-200 dark:border-slate-700 align-top">
+                          <textarea
+                            className="w-full bg-transparent text-slate-700 dark:text-slate-300 text-sm outline-none border-b border-transparent focus:border-[var(--color-primary)] py-0.5 resize-none leading-tight"
+                            value={cell}
+                            onChange={(e) => handleCellChange(rowIdx, colIdx, e.target.value)}
+                            rows={cell && cell.includes('\n') ? cell.split('\n').length : 1}
+                          />
+                        </td>
+                      ))}
+                      <td className="px-2 py-2 align-top">
+                        <button
+                          onClick={() => handleRemoveRow(rowIdx)}
+                          className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Remove row"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">delete</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Table Actions */}
+          <div className="flex gap-2">
+            <button
+              onClick={handleAddRow}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-green-50 hover:bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 dark:hover:bg-green-900/50 rounded-lg border border-green-200 dark:border-green-800 transition-colors"
+            >
+              <span className="material-symbols-outlined text-[14px]">add</span>
+              Add Row
+            </button>
+            <button
+              onClick={handleAddColumn}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 rounded-lg border border-blue-200 dark:border-blue-800 transition-colors"
+            >
+              <span className="material-symbols-outlined text-[14px]">add</span>
+              Add Column
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ========== ARRAY-OF-OBJECTS AS TABLE (e.g., adverse_events) ==========
+    // Check if value is an array of simple objects (like [{event: "X", percentage: "Y"}])
+    const isArrayOfObjects = Array.isArray(value) && value.length > 0 &&
+      typeof value[0] === 'object' && value[0] !== null &&
+      !value[0].chart_type && !value[0].data && !value[0].question; // Not a chart item
+
+    if (isArrayOfObjects) {
+      const headers = Object.keys(value[0]);
+
+      const handleArrayCellChange = (rowIdx: number, colKey: string, newValue: string) => {
+        const newArray = value.map((row: any, rIdx: number) =>
+          rIdx === rowIdx ? { ...row, [colKey]: newValue } : row
+        );
+        handleUpdate(newArray);
+      };
+
+      const handleArrayAddRow = () => {
+        const newRow: any = {};
+        headers.forEach(h => newRow[h] = '');
+        handleUpdate([...value, newRow]);
+      };
+
+      const handleArrayRemoveRow = (rowIdx: number) => {
+        handleUpdate(value.filter((_: any, idx: number) => idx !== rowIdx));
+      };
+
+      return (
+        <div className="mt-4 space-y-3">
+          <div className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-gradient-to-r from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-800/80 border-b-2 border-slate-200 dark:border-slate-700">
+                  <tr>
+                    <th className="px-2 py-2 w-10 text-center text-slate-400 text-xs">#</th>
+                    {headers.map((header: string, colIdx: number) => (
+                      <th key={colIdx} className="px-3 py-2 border-l border-slate-200 dark:border-slate-700 min-w-[120px]">
+                        <span className="font-bold text-slate-700 dark:text-slate-200 text-xs uppercase tracking-wider">
+                          {header.replace(/_/g, ' ')}
+                        </span>
+                      </th>
+                    ))}
+                    <th className="px-2 py-2 w-10"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {value.map((row: any, rowIdx: number) => (
+                    <tr key={rowIdx} className="group hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+                      <td className="px-2 py-2 text-center text-slate-400 text-xs font-mono">{rowIdx + 1}</td>
+                      {headers.map((colKey: string, colIdx: number) => (
+                        <td key={colIdx} className="px-3 py-2 border-l border-slate-200 dark:border-slate-700">
+                          <input
+                            type="text"
+                            className="w-full bg-transparent text-slate-700 dark:text-slate-300 text-sm outline-none border-b border-transparent focus:border-[var(--color-primary)] py-0.5"
+                            value={row[colKey] || ''}
+                            onChange={(e) => handleArrayCellChange(rowIdx, colKey, e.target.value)}
+                          />
+                        </td>
+                      ))}
+                      <td className="px-2 py-2">
+                        <button
+                          onClick={() => handleArrayRemoveRow(rowIdx)}
+                          className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Remove row"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">delete</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Table Actions */}
+          <div className="flex gap-2">
+            <button
+              onClick={handleArrayAddRow}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-green-50 hover:bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 dark:hover:bg-green-900/50 rounded-lg border border-green-200 dark:border-green-800 transition-colors"
+            >
+              <span className="material-symbols-outlined text-[14px]">add</span>
+              Add Row
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ========== CHART/ARRAY DATA RENDERING ==========
     let chartsArray = null;
     let isWrapped = false;
     if (Array.isArray(value)) {
@@ -502,6 +898,7 @@ export default function Dashboard() {
     );
   };
 
+  // Data for Word doc generation (no metadata)
   const currentFetchedAnswers = extractionFeed
     .filter(f => f.status === 'COMPLETED' && f.parsedObj)
     .reduce((acc, feed) => {
@@ -515,6 +912,34 @@ export default function Dashboard() {
         }
       }
       return { ...acc, [finalKey]: feed.parsedObj };
+    }, {});
+
+  // Full context WITH metadata for chatbot (helps explain confidence/sources to writers)
+  const chatbotContextWithMetadata = extractionFeed
+    .filter(f => f.status === 'COMPLETED' && f.parsedObj)
+    .reduce((acc, feed) => {
+      const keyIndex = keys.indexOf(feed.title);
+      let finalKey = feed.title;
+      if (keyIndex !== -1) {
+        const m = mapping[String(keyIndex + 1) as keyof typeof mapping] as any;
+        if (m) {
+          if (m.placeholder) finalKey = m.placeholder;
+          else if (m.table_placeholder) finalKey = m.table_placeholder.replace(/^{{/, '').replace(/}}$/, '');
+        }
+      }
+      return {
+        ...acc,
+        [finalKey]: {
+          data: feed.parsedObj,
+          metadata: {
+            confidence_score: feed.confidenceScore,
+            source_quote: feed.sourceQuote,
+            source_file: feed.sourceFile,
+            source_page: feed.sourcePage,
+            source_section: feed.sourceSection
+          }
+        }
+      };
     }, {});
 
   const handleChatbotUpdate = (keyToUpdate: string, newValue: any) => {
@@ -555,6 +980,18 @@ export default function Dashboard() {
             <span className="w-2 h-2 rounded-full bg-green-500"></span>
             System Online
           </div>
+          {/* TEST MODE BUTTON - Load mock data for UI testing */}
+          <button
+            onClick={() => {
+              setExtractionFeed(MOCK_EXTRACTION_DATA);
+              setVectorStoreId("test_vector_store_id");
+            }}
+            className="flex items-center gap-2 bg-purple-100 hover:bg-purple-200 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50 px-3 py-2 rounded-lg text-xs font-semibold transition-colors border border-purple-200 dark:border-purple-800"
+            title="Load mock data to test UI elements without API calls"
+          >
+            <span className="material-symbols-outlined text-sm">science</span>
+            <span>Test Mode</span>
+          </button>
           <button onClick={generateReport} disabled={isGenerating} className="flex items-center gap-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary)]/90 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50">
             {isGenerating ? (
               <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin"></div>
@@ -785,15 +1222,84 @@ export default function Dashboard() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {feed.sourceQuote && (
-                          <button
-                            onClick={() => alert(`Source Snippet Document Proof: \n\n"${feed.sourceQuote}"\n\nFile: ${feed.sourceFile || 'Unknown'}\nSection: ${feed.sourceSection || 'Unknown'}\nPage: ${feed.sourcePage || 'Unknown'}`)}
-                            className="text-[10px] font-bold text-slate-500 hover:text-[var(--color-primary)] bg-slate-100 dark:bg-slate-800 hover:bg-[var(--color-primary)]/10 px-2.5 py-1 flex items-center gap-1 rounded transition-colors mr-2 border border-transparent hover:border-[var(--color-primary)]/20"
-                            title="View source quote"
-                          >
-                            <span className="material-symbols-outlined text-[13px]">format_quote</span>
-                            VIEW SOURCE
-                          </button>
+                        {(feed.sourceFile || feed.sourcePage || feed.sourceSection) && (
+                          <div className="relative group">
+                            {/* Compact metadata badges */}
+                            <div className="flex items-center gap-1.5 text-[10px] text-slate-500 bg-slate-50 dark:bg-slate-800/50 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors">
+                              {feed.sourceFile && (
+                                <span className="flex items-center gap-0.5">
+                                  <span className="material-symbols-outlined text-[11px]">description</span>
+                                  {feed.sourceFile.length > 15 ? feed.sourceFile.slice(0, 15) + '...' : feed.sourceFile}
+                                </span>
+                              )}
+                              {feed.sourcePage && (
+                                <span className="flex items-center gap-0.5 border-l border-slate-300 dark:border-slate-600 pl-1.5">
+                                  <span className="material-symbols-outlined text-[11px]">article</span>
+                                  {feed.sourcePage.length > 10 ? feed.sourcePage.slice(0, 10) + '...' : feed.sourcePage}
+                                </span>
+                              )}
+                              {feed.sourceSection && (
+                                <span className="flex items-center gap-0.5 border-l border-slate-300 dark:border-slate-600 pl-1.5 max-w-[80px] truncate">
+                                  <span className="material-symbols-outlined text-[11px]">bookmark</span>
+                                  {feed.sourceSection}
+                                </span>
+                              )}
+                              <span className="material-symbols-outlined text-[10px] text-slate-400 ml-0.5">info</span>
+                            </div>
+
+                            {/* Hover Popup - Full metadata details */}
+                            <div className="absolute right-0 top-full mt-2 z-50 hidden group-hover:block animate-in fade-in slide-in-from-top-1 duration-200">
+                              <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-3 min-w-[280px] max-w-[400px]">
+                                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                                  <span className="material-symbols-outlined text-[12px]">info</span>
+                                  Source Metadata
+                                </div>
+                                <div className="space-y-2">
+                                  {feed.sourceFile && (
+                                    <div className="flex items-start gap-2">
+                                      <span className="material-symbols-outlined text-[14px] text-blue-500 mt-0.5">description</span>
+                                      <div>
+                                        <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Source File</div>
+                                        <div className="text-xs text-slate-700 dark:text-slate-300 break-all">{feed.sourceFile}</div>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {feed.sourcePage && (
+                                    <div className="flex items-start gap-2">
+                                      <span className="material-symbols-outlined text-[14px] text-green-500 mt-0.5">article</span>
+                                      <div>
+                                        <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Page</div>
+                                        <div className="text-xs text-slate-700 dark:text-slate-300">{feed.sourcePage}</div>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {feed.sourceSection && (
+                                    <div className="flex items-start gap-2">
+                                      <span className="material-symbols-outlined text-[14px] text-purple-500 mt-0.5">bookmark</span>
+                                      <div>
+                                        <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Section</div>
+                                        <div className="text-xs text-slate-700 dark:text-slate-300">{feed.sourceSection}</div>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {feed.confidenceScore !== undefined && (
+                                    <div className="flex items-start gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+                                      <span className="material-symbols-outlined text-[14px] text-amber-500 mt-0.5">speed</span>
+                                      <div>
+                                        <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">AI Confidence</div>
+                                        <div className={`text-xs font-bold ${feed.confidenceScore >= 85 ? 'text-green-600' : feed.confidenceScore >= 70 ? 'text-amber-600' : 'text-red-600'}`}>
+                                          {feed.confidenceScore}% {feed.confidenceScore >= 85 ? '(High)' : feed.confidenceScore >= 70 ? '(Medium)' : '(Low - Review Recommended)'}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+                                  <p className="text-[9px] text-slate-400 italic">💡 Expand "Source Evidence" below for full quote</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                         )}
                         {feed.status === 'FETCHING...' ? (
                           <div className="flex items-center gap-2 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 rounded">
@@ -867,6 +1373,146 @@ export default function Dashboard() {
                             {refiningKey === feed.title ? 'Refining...' : 'Refine with AI'}
                           </button>
                         </div>
+
+                        {/* Source Evidence & Reasoning Panel - Collapsible */}
+                        {(feed.sourceQuote || feed.reasoning) && (
+                          <details className="group mt-3">
+                            <summary className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-[var(--color-primary)] transition-colors select-none">
+                              <span className="material-symbols-outlined text-[14px] transition-transform group-open:rotate-90">chevron_right</span>
+                              <span className="material-symbols-outlined text-[14px] text-blue-500">verified_user</span>
+                              Source Evidence & AI Reasoning
+                            </summary>
+                            <div className="mt-2 space-y-3">
+
+                              {/* AI Reasoning Tab */}
+                              {feed.reasoning && (
+                                <div className="p-3 bg-purple-50/50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800/50 rounded-lg">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="material-symbols-outlined text-purple-500 text-[14px]">psychology</span>
+                                    <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider">AI Reasoning</span>
+                                  </div>
+                                  <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                                    {feed.reasoning}
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Source Quote */}
+                              {feed.sourceQuote && (
+                                <div className="p-3 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/50 rounded-lg">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="material-symbols-outlined text-blue-500 text-[14px]">format_quote</span>
+                                    <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Source Quote</span>
+                                  </div>
+                                  <blockquote className="text-xs text-slate-700 dark:text-slate-300 italic leading-relaxed bg-white/50 dark:bg-slate-800/50 p-2 rounded border-l-2 border-blue-400">
+                                    "{feed.sourceQuote}"
+                                  </blockquote>
+                                </div>
+                              )}
+
+                              {/* Source References - Handles Multiple Sources */}
+                              {(feed.sourceFile || feed.sourcePage || feed.sourceSection) && (
+                                <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg">
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <span className="material-symbols-outlined text-slate-500 text-[14px]">source</span>
+                                    <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Source References</span>
+                                  </div>
+
+                                  {/* Parse semicolon-separated sources into individual items */}
+                                  {(() => {
+                                    const files = feed.sourceFile?.split(';').map((s: string) => s.trim()).filter(Boolean) || [];
+                                    const pages = feed.sourcePage?.split(';').map((s: string) => s.trim()).filter(Boolean) || [];
+                                    const sections = feed.sourceSection?.split(';').map((s: string) => s.trim()).filter(Boolean) || [];
+                                    const maxLen = Math.max(files.length, pages.length, sections.length);
+
+                                    if (maxLen <= 1) {
+                                      // Single source - simple display
+                                      return (
+                                        <div className="flex flex-wrap gap-3">
+                                          {feed.sourceFile && (
+                                            <div className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 px-2 py-1 rounded border border-slate-200 dark:border-slate-600">
+                                              <span className="material-symbols-outlined text-[13px] text-blue-500">description</span>
+                                              <span className="font-medium">File:</span> {feed.sourceFile}
+                                            </div>
+                                          )}
+                                          {feed.sourcePage && (
+                                            <div className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 px-2 py-1 rounded border border-slate-200 dark:border-slate-600">
+                                              <span className="material-symbols-outlined text-[13px] text-green-500">article</span>
+                                              <span className="font-medium">Page:</span> {feed.sourcePage}
+                                            </div>
+                                          )}
+                                          {feed.sourceSection && (
+                                            <div className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 px-2 py-1 rounded border border-slate-200 dark:border-slate-600">
+                                              <span className="material-symbols-outlined text-[13px] text-purple-500">bookmark</span>
+                                              <span className="font-medium">Section:</span> {feed.sourceSection}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    }
+
+                                    // Multiple sources - display as list
+                                    return (
+                                      <div className="space-y-2">
+                                        <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                                          <span className="material-symbols-outlined text-[12px]">info</span>
+                                          Data compiled from {maxLen} sources:
+                                        </p>
+                                        <div className="grid gap-2">
+                                          {Array.from({ length: maxLen }).map((_, i) => (
+                                            <div key={i} className="flex flex-wrap gap-2 items-center bg-white dark:bg-slate-900 p-2 rounded border border-slate-200 dark:border-slate-600">
+                                              <span className="text-[10px] font-bold text-slate-400 w-5">#{i + 1}</span>
+                                              {files[i] && (
+                                                <span className="flex items-center gap-1 text-[10px] text-slate-600 dark:text-slate-400">
+                                                  <span className="material-symbols-outlined text-[11px] text-blue-500">description</span>
+                                                  {files[i]}
+                                                </span>
+                                              )}
+                                              {pages[i] && (
+                                                <span className="flex items-center gap-1 text-[10px] text-slate-600 dark:text-slate-400 border-l border-slate-300 dark:border-slate-600 pl-2">
+                                                  <span className="material-symbols-outlined text-[11px] text-green-500">article</span>
+                                                  {pages[i]}
+                                                </span>
+                                              )}
+                                              {sections[i] && (
+                                                <span className="flex items-center gap-1 text-[10px] text-slate-600 dark:text-slate-400 border-l border-slate-300 dark:border-slate-600 pl-2">
+                                                  <span className="material-symbols-outlined text-[11px] text-purple-500">bookmark</span>
+                                                  {sections[i]}
+                                                </span>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              )}
+
+                              {/* Confidence Score */}
+                              {feed.confidenceScore !== undefined && (
+                                <div className={`p-2 rounded-lg border flex items-center justify-between ${feed.confidenceScore >= 85 ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : feed.confidenceScore >= 70 ? 'bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`material-symbols-outlined text-[16px] ${feed.confidenceScore >= 85 ? 'text-green-600' : feed.confidenceScore >= 70 ? 'text-amber-600' : 'text-red-600'}`}>
+                                      {feed.confidenceScore >= 85 ? 'verified' : feed.confidenceScore >= 70 ? 'help' : 'warning'}
+                                    </span>
+                                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">AI Confidence Score</span>
+                                  </div>
+                                  <div className={`text-sm font-bold ${feed.confidenceScore >= 85 ? 'text-green-600' : feed.confidenceScore >= 70 ? 'text-amber-600' : 'text-red-600'}`}>
+                                    {feed.confidenceScore}%
+                                    <span className="text-[10px] font-normal ml-1">
+                                      ({feed.confidenceScore >= 85 ? 'High' : feed.confidenceScore >= 70 ? 'Medium' : 'Low - Review Recommended'})
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+
+                              <p className="text-[10px] text-slate-500 dark:text-slate-500 italic">
+                                💡 Use this evidence to verify the AI extraction and for your citations in the final document.
+                              </p>
+                            </div>
+                          </details>
+                        )}
                       </div>
                     )}
                   </div>
@@ -880,7 +1526,7 @@ export default function Dashboard() {
       {/* Floating Chatbot Widget */}
       <Chatbot
         vectorStoreId={vectorStoreId}
-        fetchedAnswers={currentFetchedAnswers}
+        fetchedAnswers={chatbotContextWithMetadata}
         onUpdateData={handleChatbotUpdate}
       />
     </div>
