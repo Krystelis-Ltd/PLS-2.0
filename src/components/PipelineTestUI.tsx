@@ -154,8 +154,6 @@ export function PipelineTestUI({ onClose }: TestUIProps) {
                 <JsonEditor
                   data={currentMockData}
                   onUpdate={handleUpdate}
-                  onRequestAIRefine={() => {}}
-                  isRefining={false}
                 />
               </div>
             )}
