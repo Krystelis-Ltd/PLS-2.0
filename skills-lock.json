@@ -30,6 +30,16 @@
       "source": "laguagu/claude-code-nextjs-skills",
       "sourceType": "github",
       "computedHash": "7916e7c879cc92d4a08eac4a5341b2ee7d6cbcb350b9f8169b3bfceb34f169e6"
+    },
+    "production-code-audit": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "computedHash": "a15d5ce4b86b24051dbb2646be659e1a90f9090472a1f2267e69ac58d31ae2e5"
+    },
+    "security-best-practices": {
+      "source": "supercent-io/skills-template",
+      "sourceType": "github",
+      "computedHash": "c5ddd50338549d28b2edd45cec131d6a231349b0671a093b3b7e3b51d4780ab8"
     }
   }
 }

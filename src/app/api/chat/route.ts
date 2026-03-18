@@ -1,21 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || "",
-});
+import { openai } from '@/lib/openai';
+import { AI_MODEL } from '@/lib/constants';
+import type { OpenAIResponsePayload, ChatRequest } from '@/types';
 
 export const maxDuration = 300;
 
-interface OpenAIRawResponse {
-    output_text?: string;
-    output?: Array<{ type: string; name?: string; arguments?: string | Record<string, unknown> }>;
-    choices?: Array<{ message?: { content?: string } }>;
-}
-
 export async function POST(request: NextRequest) {
     try {
-        const { messages, vectorStoreId, fetchedAnswers } = await request.json();
+        const body: ChatRequest = await request.json();
+        const { messages, vectorStoreId, fetchedAnswers } = body;
 
         if (!messages || !vectorStoreId) {
             return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
@@ -40,14 +33,14 @@ export async function POST(request: NextRequest) {
             4. If the user asks you to update, change, edit, or manipulate any data point in the extracted JSON, you MUST use the \`update_json_value\` tool to do so programmatically.
         `;
 
-        const conversationText = messages.map((m: { role: string; content: string }) => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
+        const conversationText = messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
         const inputStr = "Please answer the latest user request based on the following conversation history:\n" + conversationText;
 
         let reply = "";
 
         try {
-            const response = await (openai as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<OpenAIRawResponse> } }).responses.create({
-                model: "gpt-5.4",
+            const response = await (openai as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<OpenAIResponsePayload> } }).responses.create({
+                model: AI_MODEL,
                 instructions: systemMessage,
                 input: inputStr,
                 tools: [
@@ -82,11 +75,11 @@ export async function POST(request: NextRequest) {
             const toolCall = outputArray.find((item) => item.type === "function_call" && item.name === "update_json_value");
 
             if (toolCall) {
-                let args;
+                let args: Record<string, unknown>;
                 try {
-                    args = typeof toolCall.arguments === 'string' ? JSON.parse(toolCall.arguments) : toolCall.arguments;
-                } catch (e) {
-                    console.error("Failed to parse tool call arguments:", e);
+                    args = typeof toolCall.arguments === 'string' ? JSON.parse(toolCall.arguments) : (toolCall.arguments as Record<string, unknown>) || {};
+                } catch {
+                    console.error("[chat] Failed to parse tool call arguments");
                     args = {};
                 }
 
@@ -104,7 +97,7 @@ export async function POST(request: NextRequest) {
                 return NextResponse.json({ reply: reply.replace(/^```[a-z]*\n/i, '').replace(/\n```$/i, '').trim() });
             }
         } catch (e: unknown) {
-            console.warn("responses.create failed, falling back to beta thread:", e instanceof Error ? e.message : String(e));
+            console.warn("[chat] responses.create failed, falling back to beta thread:", e instanceof Error ? e.message : String(e));
         }
 
         // Fallback to standard OpenAI Assistant API
@@ -114,7 +107,7 @@ export async function POST(request: NextRequest) {
             tools: [{ type: "file_search" }],
         });
         const thread = await openai.beta.threads.create({
-            messages: messages.map((m: { role: 'user' | 'assistant'; content: string }) => ({ role: m.role, content: m.content })),
+            messages: messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
             tool_resources: {
                 file_search: { vector_store_ids: [vectorStoreId] }
             }
@@ -136,13 +129,13 @@ export async function POST(request: NextRequest) {
             throw new Error("Empty response from AI");
         }
 
-        // Clean up markdown block if model outputted one
         reply = reply.replace(/^```[a-z]*\n/i, '').replace(/\n```$/i, '').trim();
 
         return NextResponse.json({ reply });
 
     } catch (error: unknown) {
-        console.error("Chat error:", error);
-        return NextResponse.json({ error: "Chat failed", details: error instanceof Error ? error.message : String(error) }, { status: 500 });
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error("[chat] Error:", msg);
+        return NextResponse.json({ error: "Chat failed", details: msg }, { status: 500 });
     }
 }

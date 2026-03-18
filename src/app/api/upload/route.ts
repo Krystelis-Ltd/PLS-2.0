@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { openai } from '@/lib/openai';
+import { MAX_FILE_SIZE_BYTES, ALLOWED_FILE_EXTENSIONS } from '@/lib/constants';
+import type { UploadStats } from '@/types';
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
-
-export const maxDuration = 300; // Increase max duration for Vercel/Next.js to 5 minutes to accommodate large uploads
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
     try {
@@ -17,12 +14,28 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'No files provided' }, { status: 400 });
         }
 
-        console.log(`Starting upload of ${files.length} files to OpenAI storage...`);
+        // Validate file sizes and types
+        for (const file of files) {
+            if (file.size > MAX_FILE_SIZE_BYTES) {
+                return NextResponse.json(
+                    { error: `File "${file.name}" exceeds maximum size of ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB` },
+                    { status: 400 }
+                );
+            }
+            const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+            if (!ALLOWED_FILE_EXTENSIONS.includes(ext as typeof ALLOWED_FILE_EXTENSIONS[number])) {
+                return NextResponse.json(
+                    { error: `File "${file.name}" has unsupported extension. Allowed: ${ALLOWED_FILE_EXTENSIONS.join(', ')}` },
+                    { status: 400 }
+                );
+            }
+        }
+
+        console.log(`[upload] Starting upload of ${files.length} files to OpenAI storage`);
 
         const uploadedFileIds: string[] = [];
         const errors: string[] = [];
 
-        // 2. Upload files to OpenAI in parallel
         const uploadPromises = files.map(async (file) => {
             try {
                 const fileUploadResponse = await openai.files.create({
@@ -30,10 +43,11 @@ export async function POST(request: NextRequest) {
                     purpose: 'assistants',
                 });
                 uploadedFileIds.push(fileUploadResponse.id);
-                console.log(`Successfully uploaded file: ${file.name} (${fileUploadResponse.id})`);
-            } catch (e: any) {
-                console.error(`Failed to upload ${file.name}:`, e);
-                errors.push(`Failed to upload '${file.name}': ${e.message}`);
+                console.log(`[upload] Uploaded: ${file.name} (${fileUploadResponse.id})`);
+            } catch (e: unknown) {
+                const msg = e instanceof Error ? e.message : String(e);
+                console.error(`[upload] Failed: ${file.name}:`, msg);
+                errors.push(`Failed to upload '${file.name}': ${msg}`);
             }
         });
 
@@ -41,36 +55,32 @@ export async function POST(request: NextRequest) {
 
         if (uploadedFileIds.length === 0) {
             return NextResponse.json(
-                {
-                    success: false,
-                    message: 'No files were uploaded successfully.',
-                    errors,
-                },
+                { success: false, message: 'No files were uploaded successfully.', errors },
                 { status: 500 }
             );
         }
 
-        // 3. Create a Vector Store and add the uploaded files
         let vectorStoreId = "";
         try {
-            console.log("Creating vector store for GPT-5.4 file_search...");
+            console.log("[upload] Creating vector store...");
             const vectorStore = await openai.vectorStores.create({
                 name: "Document Assistant Vector Store"
             });
             vectorStoreId = vectorStore.id;
 
-            console.log(`Polling file batch attachment to vector store ${vectorStoreId}...`);
+            console.log(`[upload] Attaching files to vector store ${vectorStoreId}...`);
             await openai.vectorStores.fileBatches.createAndPoll(
                 vectorStoreId,
                 { file_ids: uploadedFileIds }
             );
-            console.log("Vector store ready.");
-        } catch (vsError: any) {
-            console.error("Vector store creation failed:", vsError);
-            errors.push(`Vector store creation failed: ${vsError.message}`);
+            console.log("[upload] Vector store ready");
+        } catch (vsError: unknown) {
+            const msg = vsError instanceof Error ? vsError.message : String(vsError);
+            console.error("[upload] Vector store creation failed:", msg);
+            errors.push(`Vector store creation failed: ${msg}`);
         }
 
-        const stats = {
+        const stats: UploadStats = {
             total_files_submitted: files.length,
             successful_uploads: uploadedFileIds.length,
             success: uploadedFileIds.length > 0 && vectorStoreId !== "",
@@ -82,10 +92,11 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json(stats);
 
-    } catch (error: any) {
-        console.error("Error in upload route:", error);
+    } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error("[upload] Error:", msg);
         return NextResponse.json(
-            { error: "Failed to process upload", details: error.message },
+            { error: "Failed to process upload", details: msg },
             { status: 500 }
         );
     }

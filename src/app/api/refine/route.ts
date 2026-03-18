@@ -1,21 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || "",
-});
+import { openai } from '@/lib/openai';
+import { AI_MODEL } from '@/lib/constants';
+import type { OpenAIResponsePayload, RefineRequest } from '@/types';
 
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
     try {
-        const { rawJson, userInstructions, vectorStoreId } = await request.json();
+        const body: RefineRequest = await request.json();
+        const { rawJson, userInstructions, vectorStoreId } = body;
 
         if (!rawJson) {
             return NextResponse.json({ error: 'Missing rawJson to refine' }, { status: 400 });
         }
 
-        const KB_VECTOR_STORE_ID = "vs_6973393579548191aac1ecb82ec2d540";
+        const KB_VECTOR_STORE_ID = process.env.NOVARTIS_KB_VECTOR_STORE_ID || "";
+        if (!KB_VECTOR_STORE_ID) {
+            console.warn("[refine] NOVARTIS_KB_VECTOR_STORE_ID not set, refinement will proceed without KB lookup");
+        }
 
         const REFINEMENT_SYSTEM_PROMPT = `<system_role>
 You are the "Novartis Language Refinement Specialist," a medical writing editor 
@@ -30,7 +32,7 @@ Use the file_search tool to look up terms in the Novartis Knowledge Base.
 <absolute_requirements>
 **THE JSON OUTPUT MUST BE STRUCTURALLY IDENTICAL TO THE INPUT:**
 - SAME keys (do not rename, add, or remove any keys)
-- SAME nesting structure (do not change hierarchy)
+- SAME nesting structure (do not change hierarchy) untill user speficicall ask you to do so. for example -> add this into the answer or this is the more detal include these also in the answer.
 - SAME data types (strings remain strings, numbers remain numbers, arrays remain arrays)
 - SAME number of items in any arrays
 
@@ -136,19 +138,20 @@ ${rawJson}`;
         let refinedJson = "";
 
         try {
-            // @ts-ignore
-            const response = await (openai as any).responses.create({
-                model: "gpt-5.4",
+            const vectorStoreIds = KB_VECTOR_STORE_ID ? [KB_VECTOR_STORE_ID] : [];
+            const tools = vectorStoreIds.length > 0
+                ? [{ type: "file_search", vector_store_ids: vectorStoreIds }]
+                : [];
+
+            const response = await (openai as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<OpenAIResponsePayload> } }).responses.create({
+                model: AI_MODEL,
                 instructions: REFINEMENT_SYSTEM_PROMPT,
                 input: userPrompt,
                 text: { format: { type: "json_object" } },
-                tools: [{
-                    type: "file_search",
-                    vector_store_ids: [KB_VECTOR_STORE_ID]
-                }],
+                ...(tools.length > 0 ? { tools } : {}),
             });
 
-            // Extract text from the new responses.create payload structure
+            // Extract text from the responses.create payload structure
             if (response.output_text) {
                 refinedJson = response.output_text;
             } else if (response.output && Array.isArray(response.output)) {
@@ -176,13 +179,15 @@ ${rawJson}`;
 
             return NextResponse.json({ refinedJson });
 
-        } catch (openaiError: any) {
-            console.error("OpenAI Refinement API Error:", openaiError);
+        } catch (openaiError: unknown) {
+            const msg = openaiError instanceof Error ? openaiError.message : String(openaiError);
+            console.error("[refine] OpenAI API Error:", msg);
             throw openaiError;
         }
 
-    } catch (error: any) {
-        console.error("Refinement error:", error);
-        return NextResponse.json({ error: "Refinement failed", details: error.message }, { status: 500 });
+    } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error("[refine] Error:", msg);
+        return NextResponse.json({ error: "Refinement failed", details: msg }, { status: 500 });
     }
 }

@@ -4,10 +4,13 @@ import { patchDocument, PatchType, TextRun, Table, TableRow, TableCell, Paragrap
 import JSZip from 'jszip';
 import fs from 'fs';
 import path from 'path';
+import { TABLE_HEADER_COLORS, TREATMENT_COLOR_PALETTE } from '@/lib/constants';
+import type { GenerateRequest, TreatmentGroup, ChartEndpointItem, ChartDataset } from '@/types';
 
 export async function POST(request: NextRequest) {
     try {
-        const { parsedData, mappingName } = await request.json();
+        const body: GenerateRequest = await request.json();
+        const { parsedData, mappingName } = body;
 
         if (!parsedData) {
             return NextResponse.json({ error: 'Missing parsedData for generation' }, { status: 400 });
@@ -131,9 +134,9 @@ export async function POST(request: NextRequest) {
             throw new Error(`Template file ${templateFilename} not found at ${templatePath}`);
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- IPatch union type from docx library is complex
         const textPatches: Record<string, any> = {};
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- IPatch union type from docx library is complex
         const tablePatches: Record<string, any> = {};
 
         for (const [key, rawValue] of Object.entries(parsedData)) {
@@ -158,12 +161,12 @@ export async function POST(request: NextRequest) {
                 // It's a table based on headers and rows properties in the json object
                 const { headers, rows } = value as { headers: string[], rows: string[][] };
 
-                const headerColors = ['EC6602', '0460A9', '2E74B5', '0091DF', '326496', '3C7896'];
+                const headerColors = TABLE_HEADER_COLORS;
 
                 const tableRows = [
                     new TableRow({
                         children: headers.map((h: string, i: number) => {
-                            const bgColor = i < headerColors.length ? headerColors[i] : '0460A9';
+                            const bgColor = headerColors[i % headerColors.length];
                             return new TableCell({
                                 shading: { fill: bgColor },
                                 verticalAlign: VerticalAlign.CENTER,
@@ -231,8 +234,7 @@ export async function POST(request: NextRequest) {
                         }
                     } else {
                         // Creates a 3 row layout: header, dose, participants
-                        const colorPalette = ['10384F', '00617F', '2E74B5', '0091DF', '326496', '3C7896'];
-                        const _reSpace = /(\d+\s*(?:mg|µg|mcg|g|ml|mL|IU|units?)(?:\/\w+)?)/i;
+                        const colorPalette = TREATMENT_COLOR_PALETTE;
 
                         const tableRows = [
                             new TableRow({
@@ -246,8 +248,8 @@ export async function POST(request: NextRequest) {
                                 }))
                             }),
                             new TableRow({
-                                children: groups.map((g: any) => {
-                                    const doseMatch = _reSpace.exec(g.name);
+                                children: groups.map((g: TreatmentGroup) => {
+                                    const doseMatch = /(\d+\s*(?:mg|µg|mcg|g|ml|mL|IU|units?)(?:\/\w+)?)/i.exec(g.name);
                                     const doseText = doseMatch ? doseMatch[1] : g.name;
                                     return new TableCell({
                                         verticalAlign: VerticalAlign.CENTER,
@@ -259,7 +261,7 @@ export async function POST(request: NextRequest) {
                                 })
                             }),
                             new TableRow({
-                                children: groups.map((g: any) => new TableCell({
+                                children: groups.map((g: TreatmentGroup) => new TableCell({
                                     verticalAlign: VerticalAlign.CENTER,
                                     children: [new Paragraph({
                                         alignment: AlignmentType.CENTER,
@@ -288,11 +290,11 @@ export async function POST(request: NextRequest) {
                             ]
                         };
                     }
-                } else if (key === 'efficacy_primary_endpoint_results_conclusion' || (value && Array.isArray((value as any).chart_data))) {
-                    let chart_data_items = Array.isArray(value) ? value : (value as any).chart_data;
+                } else if (key === 'efficacy_primary_endpoint_results_conclusion' || (value && typeof value === 'object' && Array.isArray((value as Record<string, unknown>).chart_data))) {
+                    let chart_data_items: ChartEndpointItem[] = Array.isArray(value) ? value as ChartEndpointItem[] : ((value as Record<string, unknown>).chart_data as ChartEndpointItem[]);
                     if (!chart_data_items) chart_data_items = [];
 
-                    let rootBlocks: any[] = [];
+                    const rootBlocks: (Paragraph | Table)[] = [];
 
                     for (const item of chart_data_items) {
                         const question = item.question || '';
@@ -306,15 +308,15 @@ export async function POST(request: NextRequest) {
                         if (definition) rootBlocks.push(new Paragraph({ children: [new TextRun(definition)] }));
                         if (assessment) rootBlocks.push(new Paragraph({ children: [new TextRun(assessment)] }));
 
-                        const dataConfig = item.data || {};
+                        const dataConfig: { labels?: string[]; datasets?: ChartDataset[] } = item.data || {};
                         const labels = dataConfig.labels || [];
                         const datasets = dataConfig.datasets || [];
 
                         if (labels.length > 0 && datasets.length > 0) {
-                            const colorPalette = ['10384F', '00617F', '2E74B5', '0091DF', '326496', '3C7896'];
+                            const colorPalette = TREATMENT_COLOR_PALETTE;
                             const tblRows = [
                                 new TableRow({
-                                    children: labels.map((lb: any, i: number) => new TableCell({
+                                    children: labels.map((lb: string, i: number) => new TableCell({
                                         shading: { fill: colorPalette[i % colorPalette.length] },
                                         verticalAlign: VerticalAlign.CENTER,
                                         children: [new Paragraph({
@@ -323,8 +325,8 @@ export async function POST(request: NextRequest) {
                                         })],
                                     }))
                                 }),
-                                ...datasets.map((ds: any) => new TableRow({
-                                    children: labels.map((_: any, ci: number) => {
+                                ...datasets.map((ds: ChartDataset) => new TableRow({
+                                    children: labels.map((_: string, ci: number) => {
                                         const ds_vals = ds.data || [];
                                         const val = ci < ds_vals.length ? ds_vals[ci] : '';
                                         return new TableCell({
@@ -437,8 +439,9 @@ export async function POST(request: NextRequest) {
             },
         });
 
-    } catch (error: any) {
-        console.error("Generation error:", error);
-        return NextResponse.json({ error: "Generation failed", details: error.message }, { status: 500 });
+    } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error("[generate] Error:", msg);
+        return NextResponse.json({ error: "Generation failed", details: msg }, { status: 500 });
     }
 }

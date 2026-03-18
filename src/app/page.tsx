@@ -6,6 +6,9 @@ import { extractPrompts } from '@/utils/promptLoader'
 import { JsonEditor } from '@/components/JsonEditor'
 import { Chatbot } from '@/components/Chatbot'
 import { PipelineTestUI } from '@/components/PipelineTestUI'
+import { useToast } from '@/components/Toast'
+import { EXTRACTION_BATCH_SIZE, METADATA_KEYS, CITATION_KEYS_TO_REMOVE } from '@/lib/constants'
+import type { FileEntry, ExtractionFeedItem, SourceModalData } from '@/types'
 
 // Animation variants (framer-motion-animator skill)
 const fadeInDown = {
@@ -32,6 +35,7 @@ const staggerItem = {
 }
 
 export default function Dashboard() {
+  const { showToast } = useToast()
   const [readabilityLevel, setReadabilityLevel] = useState("6th Grade")
   const [mappingName, setMappingName] = useState("results_PLS")
 
@@ -50,29 +54,29 @@ export default function Dashboard() {
     setSelectedPrompts(newSelections)
   }, [mappingName]) // omitting keys dependency to avoid infinite loop on object identity change
 
-  const [files, setFiles] = useState<any[]>([])
+  const [files, setFiles] = useState<FileEntry[]>([])
   const [queuedFiles, setQueuedFiles] = useState<File[]>([])
   const [isUploading, setIsUploading] = useState(false)
   const [vectorStoreId, setVectorStoreId] = useState<string | null>(null)
-  const [extractionFeed, setExtractionFeed] = useState<any[]>([])
+  const [extractionFeed, setExtractionFeed] = useState<ExtractionFeedItem[]>([])
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractionProgress, setExtractionProgress] = useState(0)
   const [extractionTimeMs, setExtractionTimeMs] = useState(0)
   const [isGenerating, setIsGenerating] = useState(false)
-  const [sourceModal, setSourceModal] = useState<{ quote: string; file: string; section: string; page: string } | null>(null)
+  const [sourceModal, setSourceModal] = useState<SourceModalData | null>(null)
   const [showTestUI, setShowTestUI] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    let interval: any;
+    let interval: ReturnType<typeof setInterval> | undefined;
     if (isExtracting) {
       interval = setInterval(() => {
         setExtractionTimeMs(prev => prev + 100);
       }, 100);
-    } else if (!isExtracting && extractionTimeMs !== 0) {
-      clearInterval(interval);
     }
-    return () => clearInterval(interval);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [isExtracting]);
 
   const formatTime = (ms: number) => {
@@ -133,12 +137,12 @@ export default function Dashboard() {
             : f
         ));
       } else {
-        alert("Upload failed: " + JSON.stringify(data.errors));
+        showToast("Upload failed: " + JSON.stringify(data.errors), 'error');
         setFiles(prev => prev.filter(f => !newFileEntries.find(nf => nf.name === f.name)));
       }
     } catch (err) {
       console.error(err);
-      alert("Error uploading files");
+      showToast("Error uploading files", 'error');
     } finally {
       setIsUploading(false);
     }
@@ -146,7 +150,7 @@ export default function Dashboard() {
 
   const runExtraction = async () => {
     if (!vectorStoreId) {
-      alert("Please upload a file first.");
+      showToast("Please upload a file first.", 'warning');
       return;
     }
 
@@ -158,7 +162,7 @@ export default function Dashboard() {
     setExtractionFeed(activeKeys.map(k => ({ title: k, status: "WAITING..." })));
 
     // Process in batches of 7 to avoid OpenAI rate limit exhaustion while optimizing speed
-    const batchSize = 7;
+    const batchSize = EXTRACTION_BATCH_SIZE;
     let completedKeys = 0;
 
     // Accumulate answers to provide context to subsequent batches
@@ -290,8 +294,8 @@ export default function Dashboard() {
           const sourceSection = rawFinalObj.source_section;
 
           // Clone to avoid mutating the shared reference, then strip metadata/citation keys
-          const keysToRemove = ['source', '_citations', 'citations', 'reasoning', 'confidence_score', 'source_quote', 'source_file', 'source_page', 'source_section'];
-          const cleanObj: Record<string, any> = {};
+          const keysToRemove: string[] = [...CITATION_KEYS_TO_REMOVE];
+          const cleanObj: Record<string, unknown> = {};
           for (const k of Object.keys(rawFinalObj)) {
             if (!keysToRemove.includes(k)) {
               cleanObj[k] = rawFinalObj[k];
@@ -306,7 +310,7 @@ export default function Dashboard() {
             // dataObj is a primitive (string, number, boolean)
             extractedText = String(dataObj);
             accumulatedAnswers[feed.title] = dataObj;
-          } else if (typeof dataObj === 'object' && Object.keys(dataObj).length > 0) {
+          } else if (dataObj !== null && typeof dataObj === 'object' && Object.keys(dataObj).length > 0) {
             extractedText = JSON.stringify(dataObj, null, 2);
             // Accumulate successfully parsed object for next batch context
             Object.assign(accumulatedAnswers, dataObj);
@@ -358,11 +362,11 @@ export default function Dashboard() {
         a.download = filename;
         a.click();
       } else {
-        alert("Report generation failed.");
+        showToast("Report generation failed.", 'error');
       }
     } catch (e) {
       console.error(e);
-      alert("Error generating report");
+      showToast("Error generating report", 'error');
     } finally {
       setIsGenerating(false);
     }
@@ -373,7 +377,7 @@ export default function Dashboard() {
 
   const handleRefine = async (key: string, rawJson: string, directInstructions?: string) => {
     if (!vectorStoreId) {
-      alert("Please upload standard reference documents to refine.");
+      showToast("Please upload standard reference documents to refine.", 'warning');
       return;
     }
     setRefiningKey(key);
@@ -399,11 +403,11 @@ export default function Dashboard() {
           return { ...feed, data: extractedText, parsedObj: refinedObj };
         }));
       } else {
-        alert("Refinement failed.");
+        showToast("Refinement failed.", 'error');
       }
     } catch (e) {
       console.error("Refinement error", e);
-      alert("Error during refinement.");
+      showToast("Error during refinement.", 'error');
     } finally {
       setRefiningKey(null);
     }
@@ -756,7 +760,7 @@ export default function Dashboard() {
                       <div className="flex items-center gap-2">
                         {feed.sourceQuote && (
                           <button
-                            onClick={() => setSourceModal({ quote: feed.sourceQuote, file: feed.sourceFile || 'Unknown', section: feed.sourceSection || 'Unknown', page: feed.sourcePage || 'Unknown' })}
+                            onClick={() => setSourceModal({ quote: feed.sourceQuote ?? '', file: feed.sourceFile || 'Unknown', section: feed.sourceSection || 'Unknown', page: feed.sourcePage || 'Unknown' })}
                             className="text-[10px] font-bold text-slate-500 hover:text-[var(--color-primary)] bg-slate-100 dark:bg-slate-800 hover:bg-[var(--color-primary)]/10 px-2.5 py-1 flex items-center gap-1 rounded transition-colors mr-2 border border-transparent hover:border-[var(--color-primary)]/20"
                             title="View source quote"
                           >

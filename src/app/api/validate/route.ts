@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || "",
-});
+import { openai } from '@/lib/openai';
+import { withRetry } from '@/lib/retry';
+import { AI_MODEL } from '@/lib/constants';
+import type { OpenAIResponsePayload, ValidateRequest } from '@/types';
 
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
     try {
-        const { keyName, extractedData, sourceQuote } = await request.json();
+        const body: ValidateRequest = await request.json();
+        const { keyName, extractedData, sourceQuote } = body;
 
         // Only validate specific complex tables
         if (!keyName.includes('table')) {
@@ -42,44 +42,34 @@ DATA TO AUDIT (JSON):
 ${JSON.stringify(extractedData)}
 `;
 
-        let raw = "";
-        for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-                // @ts-ignore
-                const response = await (openai as any).responses.create({
-                    model: "gpt-5.4",
-                    instructions: developerMessage,
-                    input: userPrompt,
-                    reasoning: { effort: "low" }
-                });
+        const raw = await withRetry(async () => {
+            const response = await (openai as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<OpenAIResponsePayload> } }).responses.create({
+                model: AI_MODEL,
+                instructions: developerMessage,
+                input: userPrompt,
+                reasoning: { effort: "low" }
+            });
 
-                raw = response.output_text || "";
-                if (raw) break;
-            } catch (err) {
-                console.warn(`Validation attempt ${attempt + 1} failed:`, err);
-                if (attempt === 2) throw err;
-                await new Promise(res => setTimeout(res, 1000));
-            }
-        }
+            const text = response.output_text || "";
+            if (!text) throw new Error("Empty response from validation AI");
+            return text;
+        }, { label: 'Validation Agent' });
 
-        if (!raw) {
-            throw new Error("Empty response from validation AI");
-        }
-
-        raw = raw.replace(/^```json/mi, '').replace(/```$/m, '').trim();
+        const cleaned = raw.replace(/^```json/mi, '').replace(/```$/m, '').trim();
 
         let parsedValidatedData;
         try {
-            parsedValidatedData = JSON.parse(raw);
-        } catch (e) {
-            console.warn("Validation AI returned invalid JSON, falling back to original data.");
+            parsedValidatedData = JSON.parse(cleaned);
+        } catch {
+            console.warn("[validate] AI returned invalid JSON, falling back to original data");
             parsedValidatedData = extractedData;
         }
 
         return NextResponse.json({ validatedData: parsedValidatedData });
 
-    } catch (error: any) {
-        console.error("Validation error:", error);
+    } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error("[validate] Error:", msg);
         return NextResponse.json({ error: "Validation failed" }, { status: 500 });
     }
 }

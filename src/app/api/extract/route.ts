@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || "",
-});
+import { openai } from '@/lib/openai';
+import { withRetry } from '@/lib/retry';
+import { AI_MODEL } from '@/lib/constants';
+import type { OpenAIResponsePayload, ExtractRequest } from '@/types';
 
 export const maxDuration = 300;
-
-interface OpenAIRawResponse {
-    output_text?: string;
-}
 
 /**
  * Agentic Architecture: 2-Agent Pipeline
@@ -67,29 +62,22 @@ Your output for "${k}" MUST match this schema:
 }`).join('\n\n')}
 `;
 
-    let raw = "";
-    for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-            const response = await (openai as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<OpenAIRawResponse> } }).responses.create({
-                model: "gpt-5.4",
-                instructions: retrievalSystemPrompt,
-                input: combinedPrompt,
-                reasoning: { effort: "low" },
-                tools: [{
-                    type: "file_search",
-                    vector_store_ids: [vectorStoreId],
-                }],
-                text: {}
-            });
-            raw = response.output_text || "";
-            if (raw) break;
-        } catch (err) {
-            console.warn(`Retrieval Agent attempt ${attempt + 1} failed:`, err);
-            if (attempt === 2) throw err;
-            await new Promise(res => setTimeout(res, 1000));
-        }
-    }
-    return raw;
+    return withRetry(async () => {
+        const response = await (openai as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<OpenAIResponsePayload> } }).responses.create({
+            model: AI_MODEL,
+            instructions: retrievalSystemPrompt,
+            input: combinedPrompt,
+            reasoning: { effort: "low" },
+            tools: [{
+                type: "file_search",
+                vector_store_ids: [vectorStoreId],
+            }],
+            text: {}
+        });
+        const raw = response.output_text || "";
+        if (!raw) throw new Error("Empty response from retrieval agent");
+        return raw;
+    }, { label: 'Retrieval Agent' });
 }
 
 // Agent 2: Conversion - Convert scientific language to plain language
@@ -118,30 +106,28 @@ Keep the JSON structure identical. Only simplify the text content within string 
 RAW SCIENTIFIC DATA:
 ${rawExtraction}`;
 
-    let converted = "";
-    for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-            const response = await (openai as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<OpenAIRawResponse> } }).responses.create({
-                model: "gpt-5.4",
-                instructions: conversionSystemPrompt,
-                input: conversionPrompt,
-                reasoning: { effort: "low" },
-                text: {}
-            });
-            converted = response.output_text || "";
-            if (converted) break;
-        } catch (err) {
-            console.warn(`Conversion Agent attempt ${attempt + 1} failed:`, err);
-            if (attempt === 2) throw err;
-            await new Promise(res => setTimeout(res, 1000));
-        }
-    }
-    return converted;
+    return withRetry(async () => {
+        const response = await (openai as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<OpenAIResponsePayload> } }).responses.create({
+            model: AI_MODEL,
+            instructions: conversionSystemPrompt,
+            input: conversionPrompt,
+            reasoning: { effort: "low" },
+            text: {}
+        });
+        const converted = response.output_text || "";
+        if (!converted) throw new Error("Empty response from conversion agent");
+        return converted;
+    }, { label: 'Conversion Agent' });
+}
+
+function stripMarkdownFences(text: string): string {
+    return text.replace(/^```json/mi, '').replace(/```$/m, '').trim();
 }
 
 export async function POST(request: NextRequest) {
     try {
-        const { batchPrompts, vectorStoreId, contextData } = await request.json();
+        const body: ExtractRequest = await request.json();
+        const { batchPrompts, vectorStoreId, contextData } = body;
 
         if (!batchPrompts || typeof batchPrompts !== 'object' || !vectorStoreId) {
             return NextResponse.json({ error: 'Missing batchPrompts or vectorStoreId' }, { status: 400 });
@@ -150,32 +136,33 @@ export async function POST(request: NextRequest) {
         const keys = Object.keys(batchPrompts);
 
         // === AGENT 1: Retrieval ===
-        console.log("🔍 Agent 1 (Retrieval): Starting extraction for keys:", keys);
-        let rawExtraction = await runRetrievalAgent(keys, batchPrompts, vectorStoreId, contextData);
+        console.log("[extract] Agent 1 (Retrieval): Starting for keys:", keys);
+        let rawExtraction = await runRetrievalAgent(keys, batchPrompts, vectorStoreId, contextData ?? null);
 
         if (!rawExtraction) {
             throw new Error("Agent 1 (Retrieval) returned empty response");
         }
-        rawExtraction = rawExtraction.replace(/^```json/mi, '').replace(/```$/m, '').trim();
-        console.log("✅ Agent 1 (Retrieval): Complete");
+        rawExtraction = stripMarkdownFences(rawExtraction);
+        console.log("[extract] Agent 1 (Retrieval): Complete");
 
         // === AGENT 2: Conversion ===
-        console.log("📝 Agent 2 (Conversion): Starting plain language conversion...");
+        console.log("[extract] Agent 2 (Conversion): Starting plain language conversion");
         let raw = await runConversionAgent(rawExtraction);
 
         if (!raw) {
-            console.warn("⚠️ Agent 2 (Conversion) returned empty, falling back to Agent 1 output");
+            console.warn("[extract] Agent 2 (Conversion) returned empty, falling back to Agent 1 output");
             raw = rawExtraction;
         }
-        raw = raw.replace(/^```json/mi, '').replace(/```$/m, '').trim();
-        console.log("✅ Agent 2 (Conversion): Complete");
+        raw = stripMarkdownFences(raw);
+        console.log("[extract] Agent 2 (Conversion): Complete");
 
         return NextResponse.json({ raw });
 
     } catch (error: unknown) {
-        console.error("Extraction pipeline error:", error);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error("[extract] Pipeline error:", msg);
         return NextResponse.json(
-            { error: "Extraction failed", details: error instanceof Error ? error.message : String(error) },
+            { error: "Extraction failed", details: msg },
             { status: 500 }
         );
     }
