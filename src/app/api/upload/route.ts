@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { openai } from '@/lib/openai';
+import { getOpenAIClient } from '@/lib/openai';
 import { MAX_FILE_SIZE_BYTES, ALLOWED_FILE_EXTENSIONS } from '@/lib/constants';
 import { getUserIdentity } from '@/lib/auth';
 import type { UploadStats } from '@/types';
@@ -7,6 +7,7 @@ import type { UploadStats } from '@/types';
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
+    const openai = getOpenAIClient();
     try {
         const userId = getUserIdentity(request);
         const formData = await request.formData();

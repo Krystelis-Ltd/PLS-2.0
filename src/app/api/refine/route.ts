@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { openai } from '@/lib/openai';
+import { getOpenAIClient } from '@/lib/openai';
 import { AI_MODEL } from '@/lib/constants';
 import { getUserIdentity } from '@/lib/auth';
 import type { OpenAIResponsePayload, RefineRequest } from '@/types';
@@ -7,6 +7,7 @@ import type { OpenAIResponsePayload, RefineRequest } from '@/types';
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
+    const openai = getOpenAIClient();
     try {
         const userId = getUserIdentity(request);
         const body: RefineRequest = await request.json();

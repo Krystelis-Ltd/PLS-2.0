@@ -1,17 +1,23 @@
 import OpenAI from 'openai';
 
 /**
- * Shared OpenAI client instance.
- * Fails fast at import time if OPENAI_API_KEY is not configured.
+ * Lazily instantiated OpenAI client singleton.
+ * The API key is read from `process.env.OPENAI_API_KEY` only when
+ * `getOpenAIClient()` is first called at runtime — never at build time.
  */
 
-const apiKey = process.env.OPENAI_API_KEY;
+let _client: OpenAI | null = null;
 
-if (!apiKey) {
-  throw new Error(
-    'OPENAI_API_KEY environment variable is not set. ' +
-    'Please add it to your .env.local file. See .env.example for reference.'
-  );
+export function getOpenAIClient(): OpenAI {
+  if (!_client) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        'OPENAI_API_KEY environment variable is not set. ' +
+        'Please add it to your .env.local file. See .env.example for reference.'
+      );
+    }
+    _client = new OpenAI({ apiKey });
+  }
+  return _client;
 }
-
-export const openai = new OpenAI({ apiKey });

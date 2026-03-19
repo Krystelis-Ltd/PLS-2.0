@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { openai } from '@/lib/openai';
+import type OpenAI from 'openai';
+import { getOpenAIClient } from '@/lib/openai';
 import { withRetry } from '@/lib/retry';
 import { AI_MODEL } from '@/lib/constants';
 import { getUserIdentity } from '@/lib/auth';
@@ -19,6 +20,7 @@ export const maxDuration = 300;
 
 // Agent 1: Retrieval - Extract raw scientific data from documents
 async function runRetrievalAgent(
+    openai: OpenAI,
     keys: string[],
     batchPrompts: Record<string, string>,
     vectorStoreId: string,
@@ -82,7 +84,7 @@ Your output for "${k}" MUST match this schema:
 }
 
 // Agent 2: Conversion - Convert scientific language to plain language
-async function runConversionAgent(rawExtraction: string): Promise<string> {
+async function runConversionAgent(openai: OpenAI, rawExtraction: string): Promise<string> {
     const conversionSystemPrompt = `
 <system_role>
 You are "Agent 2: Plain Language Conversion Specialist."
@@ -126,6 +128,7 @@ function stripMarkdownFences(text: string): string {
 }
 
 export async function POST(request: NextRequest) {
+    const openai = getOpenAIClient();
     try {
         const userId = getUserIdentity(request);
         const body: ExtractRequest = await request.json();
@@ -141,7 +144,7 @@ export async function POST(request: NextRequest) {
 
         // === AGENT 1: Retrieval ===
         console.log("[extract] Agent 1 (Retrieval): Starting for keys:", keys);
-        let rawExtraction = await runRetrievalAgent(keys, batchPrompts, vectorStoreId, contextData ?? null);
+        let rawExtraction = await runRetrievalAgent(openai, keys, batchPrompts, vectorStoreId, contextData ?? null);
 
         if (!rawExtraction) {
             throw new Error("Agent 1 (Retrieval) returned empty response");
@@ -151,7 +154,7 @@ export async function POST(request: NextRequest) {
 
         // === AGENT 2: Conversion ===
         console.log("[extract] Agent 2 (Conversion): Starting plain language conversion");
-        let raw = await runConversionAgent(rawExtraction);
+        let raw = await runConversionAgent(openai, rawExtraction);
 
         if (!raw) {
             console.warn("[extract] Agent 2 (Conversion) returned empty, falling back to Agent 1 output");
