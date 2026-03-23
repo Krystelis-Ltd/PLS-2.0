@@ -436,14 +436,14 @@ export async function POST(request: NextRequest) {
         const fileHash = 'sha256:' + crypto.createHash('sha256').update(zipBuffer).digest('hex');
 
         auditLog({
-            request, 
+            request,
             action: 'FILE_DOWNLOAD',
-            resource: { 
-                type: 'file', 
-                name: zipFilename, 
+            resource: {
+                type: 'file',
+                name: zipFilename,
                 size: zipBuffer.length,
                 hash: fileHash,
-                path: '/api/generate' 
+                path: '/api/generate'
             },
             status: { code: 200, result: 'SUCCESS' },
             details: { mapping_name: mappingName }
