@@ -1,0 +1,81 @@
+# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
+# More GitHub Actions for Azure: https://github.com/Azure/actions
+
+name: Build and deploy Node.js app to Azure Web App - webapp-pls-dev-ukw-ks-001
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: self-hosted
+    permissions:
+      contents: read #This is required for actions/checkout
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js version
+        uses: actions/setup-node@v4 # Upgraded to v4 for latest optimizations
+        with:
+          node-version: '22.x'
+          cache: 'npm' # Caches dependencies to significantly speed up future runs
+
+      - name: Clean Install Dependencies
+        run: npm ci
+
+      - name: Build Next.js Application
+        run: npm run build
+
+      - name: Prepare Standalone Directory for Azure
+        run: |
+          # Crucial step: Copy static assets into the standalone folder
+          cp -R public .next/standalone/public
+          cp -R .next/static .next/standalone/.next/static
+          # pptxgenjs is externalized via serverExternalPackages, so manually include it
+          cp -R node_modules/pptxgenjs .next/standalone/node_modules/pptxgenjs
+
+      - name: Upload artifact for deployment job
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-app
+          path: .next/standalone # CRITICAL: Upload only the optimized build, not the raw repo
+
+  deploy:
+    runs-on: self-hosted
+    needs: build
+    permissions:
+      id-token: write #This is required for requesting the JWT
+      contents: read #This is required for actions/checkout
+
+    steps:
+      - name: Download artifact from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: node-app
+          path: . # Downloads the standalone contents directly into the current working directory
+      
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID }}
+          
+      - name: Debug files
+        run: |
+          echo "PWD:"
+          pwd
+          echo "FILES:"
+          ls -la
+          
+      - name: 'Deploy to Azure Web App'
+        id: deploy-to-webapp
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'webapp-pls-dev-ukw-ks-001'
+          slot-name: 'Production'
+          package: . # Deploys the downloaded standalone files securely to Azure
