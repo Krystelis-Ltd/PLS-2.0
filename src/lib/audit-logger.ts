@@ -8,6 +8,7 @@ export type AuditAction =
     | 'DATA_EXTRACT' 
     | 'DATA_REFINE' 
     | 'DATA_VALIDATE'
+    | 'CHAT_MESSAGE'
     | 'CLIENT_EVENT'
     | 'SYSTEM_ERROR';
 
@@ -85,4 +86,39 @@ export function auditLog({ request, action, resource, status, details }: AuditLo
     if (status.code >= 400) {
         console.error(JSON.stringify(logEntry));
     }
+}
+
+export function timedAuditLog(request: NextRequest, category: string, eventName: string, initialDetails: any = {}) {
+    const startTime = Date.now();
+    return {
+        finish: (finalDetails: any) => {
+            const durationMs = Date.now() - startTime;
+            const statusCode = finalDetails?.status || 500;
+            const result = statusCode >= 400 ? 'FAILURE' : 'SUCCESS';
+            
+            let action: AuditAction = 'CLIENT_EVENT';
+            if (category === 'chat') action = 'CHAT_MESSAGE';
+            
+            let path = 'unknown';
+            try {
+                path = new URL(request.url).pathname;
+            } catch {
+                path = request.url;
+            }
+            
+            auditLog({
+                request,
+                action,
+                resource: { type: 'API', path },
+                status: { code: statusCode, result },
+                details: { 
+                    category, 
+                    event_name: eventName, 
+                    duration_ms: durationMs,
+                    ...initialDetails, 
+                    ...finalDetails 
+                }
+            });
+        }
+    };
 }

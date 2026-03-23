@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { openai } from '@/lib/openai';
+import { getOpenAIClient } from '@/lib/openai';
 import { withRetry } from '@/lib/retry';
 import { AI_MODEL } from '@/lib/constants';
 import { getUserIdentity } from '@/lib/auth';
@@ -65,6 +65,7 @@ Your output for "${k}" MUST match this schema:
 `;
 
     return withRetry(async () => {
+        const openai = getOpenAIClient();
         const response = await (openai as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<OpenAIResponsePayload> } }).responses.create({
             model: AI_MODEL,
             instructions: retrievalSystemPrompt,
@@ -109,6 +110,7 @@ RAW SCIENTIFIC DATA:
 ${rawExtraction}`;
 
     return withRetry(async () => {
+        const openai = getOpenAIClient();
         const response = await (openai as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<OpenAIResponsePayload> } }).responses.create({
             model: AI_MODEL,
             instructions: conversionSystemPrompt,

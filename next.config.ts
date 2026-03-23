@@ -35,7 +35,7 @@ const nextConfig: NextConfig = {
   },
 
   // Server-side packages that should not be bundled
-  serverExternalPackages: ["pptxgenjs"],
+  serverExternalPackages: ["pptxgenjs", "applicationinsights"],
 };
 
 export default nextConfig;
